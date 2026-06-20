@@ -11,11 +11,33 @@ const PORT = 5001;
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('✅ Created uploads directory:', uploadsDir);
+}
+
+// Verify uploads directory is writable
+try {
+  fs.accessSync(uploadsDir, fs.constants.W_OK);
+  console.log('✅ Uploads directory is writable');
+} catch (error) {
+  console.warn('⚠️  Uploads directory may not be writable:', error.message);
 }
 
 // Middleware
 app.use(express.json());
 app.use('/uploads', express.static(uploadsDir));
+
+// Error handling middleware for multer
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    console.error('❌ Multer error:', err.message);
+    return res.status(400).json({ message: 'File upload error: ' + err.message });
+  }
+  if (err && err.message && err.message.includes('Only image files')) {
+    console.error('❌ File validation error:', err.message);
+    return res.status(400).json({ message: err.message });
+  }
+  next();
+});
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -135,6 +157,33 @@ app.get('/api/image/:filename', (req, res) => {
   });
 });
 
+// GET endpoint - server health and diagnostics
+app.get('/api/health', (req, res) => {
+  const diagnostics = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uploads: {
+      directory: uploadsDir,
+      exists: fs.existsSync(uploadsDir),
+      writable: (() => {
+        try {
+          fs.accessSync(uploadsDir, fs.constants.W_OK);
+          return true;
+        } catch {
+          return false;
+        }
+      })(),
+      files: fs.existsSync(uploadsDir) ? fs.readdirSync(uploadsDir).length : 0
+    },
+    database: {
+      host: process.env.DB_HOST || 'localhost',
+      name: process.env.DB_NAME || 'node_app'
+    }
+  };
+  
+  res.json(diagnostics);
+});
+
 // POST endpoint - add product with multiple images
 app.post('/api/products', upload.array('images', 10), async (req, res) => {
   try {
@@ -147,8 +196,20 @@ app.post('/api/products', upload.array('images', 10), async (req, res) => {
       });
     }
 
+    // Debug: Log file upload information
+    console.log('📤 Upload request received');
+    console.log('   - Files received:', req.files ? req.files.length : 0);
+    if (req.files) {
+      req.files.forEach((file, index) => {
+        console.log(`   - File ${index + 1}: ${file.originalname} (${file.size} bytes)`);
+      });
+    }
+
     // Get image paths
     const imagePaths = req.files ? req.files.map(file => `/uploads/${file.filename}`) : [];
+
+    // Debug: Log image paths
+    console.log('   - Image paths to save:', imagePaths);
 
     const connection = await pool.getConnection();
     const [result] = await connection.execute(
@@ -156,6 +217,8 @@ app.post('/api/products', upload.array('images', 10), async (req, res) => {
       [productName, model, category, description || '', JSON.stringify(imagePaths)]
     );
     connection.release();
+
+    console.log(`✅ Product created with ID: ${result.insertId}`);
 
     res.status(201).json({
       message: 'Product added successfully',
@@ -171,7 +234,7 @@ app.post('/api/products', upload.array('images', 10), async (req, res) => {
       }
     });
   } catch (error) {
-    console.error(error);
+    console.error('❌ Error adding product:', error.message);
     res.status(500).json({ message: 'Error adding product', error: error.message });
   }
 });
@@ -254,25 +317,34 @@ app.listen(PORT, async () => {
     await connection.execute('SELECT 1');
     connection.release();
     
-    console.log(`✅ Database: Connected to MySQL successfully`);
+    console.log(`\n✅ Database: Connected to MySQL successfully`);
     
     // Initialize database tables
     await initializeDatabase();
     
-    console.log(`🚀 Server is running on http://localhost:${PORT}`);
-    console.log(`
-  Available endpoints:
-  - GET /api/data - Get all data
-  - GET /api/data/:id - Get specific data by ID
-  - POST /api/data - Add new data
-  - POST /api/upload - Upload an image
-  - GET /api/image/:filename - Retrieve uploaded image
-  - POST /api/products - Add product with multiple images
-  - GET /api/products - Get all products (with optional filters: ?productName=&model=&category=)
-  - GET /api/products/:id - Get product by ID
-    `);
+    console.log(`\n🚀 Server is running on http://localhost:${PORT}`);
+    console.log(`\n📁 File Upload Configuration:`);
+    console.log(`   - Uploads Directory: ${uploadsDir}`);
+    console.log(`   - Directory Exists: ${fs.existsSync(uploadsDir)}`);
+    try {
+      fs.accessSync(uploadsDir, fs.constants.W_OK);
+      console.log(`   - Directory Writable: ✅ Yes`);
+    } catch {
+      console.log(`   - Directory Writable: ❌ No (permission issue!)`);
+    }
+    
+    console.log(`\n📚 Available endpoints:`);
+    console.log(`   - GET  /api/health - Server diagnostics`);
+    console.log(`   - GET  /api/data - Get all data`);
+    console.log(`   - GET  /api/data/:id - Get specific data by ID`);
+    console.log(`   - POST /api/data - Add new data`);
+    console.log(`   - POST /api/upload - Upload single image`);
+    console.log(`   - GET  /api/image/:filename - Retrieve uploaded image`);
+    console.log(`   - POST /api/products - Add product with images`);
+    console.log(`   - GET  /api/products - Get products (filters: ?productName=&model=&category=)`);
+    console.log(`   - GET  /api/products/:id - Get product by ID\n`);
   } catch (error) {
-    console.error('❌ Failed to connect to database:', error.message);
+    console.error('\n❌ Failed to connect to database:', error.message);
     console.error('\n📋 Debugging information:');
     console.error('   - Check .env file has correct credentials');
     console.error('   - Verify database server is accessible');
