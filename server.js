@@ -5,13 +5,15 @@ const path = require('path');
 const fs = require('fs');
 const pool = require('./db');
 const initializeDatabase = require('./initDb');
+
+const app = express();
+const PORT = 5001;
+
 // Allow all origins (everywhere)
 app.use(cors({
   origin: '*'
 }));
 
-const app = express();
-const PORT = 5001;
 
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
