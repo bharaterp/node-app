@@ -1,9 +1,15 @@
 const express = require('express');
 const multer = require('multer');
+const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const pool = require('./db');
 const initializeDatabase = require('./initDb');
+// Allow all origins (everywhere)
+app.use(cors({
+  origin: '*'
+}));
+
 const app = express();
 const PORT = 5001;
 
